@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Snake — Simple HTML5 Game</title>
+<style>
+  :root{
+    --bg:#0f1724;
+    --panel:#071029;
+    --accent:#16a34a;
+    --muted:#9aa6b2;
+  }
+  html,body{height:100%;margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial}
+  body{
+    display:flex;align-items:center;justify-content:center;
+    background:linear-gradient(180deg,var(--bg),#071427 120%);
+    color:#e6eef6;
+  }
+  .container{
+    width:min(720px,96vw);
+    background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+    border-radius:14px; padding:18px; box-shadow:0 10px 30px rgba(2,6,23,0.6);
+    display:grid; grid-template-columns: 1fr 260px; gap:12px;
+  }
+  .title{grid-column:1/3; display:flex; justify-content:space-between; align-items:center;}
+  h1{font-size:18px;margin:0;color:var(--accent)}
+  small{color:var(--muted)}
+  canvas{
+    width:100%; height:auto; background:linear-gradient(180deg,#082031,#04121b);
+    border-radius:10px; display:block;
+  }
+  .panel{
+    background:var(--panel); border-radius:10px; padding:12px; display:flex; flex-direction:column; gap:12px;
+  }
+  .stats{display:flex; gap:12px; justify-content:space-between; font-weight:600}
+  button{
+    background:transparent;border:1px solid rgba(255,255,255,0.06); color:var(--muted);
+    padding:8px 10px;border-radius:8px; cursor:pointer;
+  }
+  button.primary{background:var(--accent); border:none; color:white}
+  .controls{display:flex; gap:8px; flex-wrap:wrap}
+  .touch-pad{display:none; gap:8px; justify-content:center; align-items:center; margin-top:6px}
+  .touch-pad button{width:56px;height:44px; font-weight:700}
+  @media (max-width:720px){
+    .container{grid-template-columns:1fr; padding:12px}
+    .panel{order:2}
+    .touch-pad{display:flex}
+  }
+  .hint{font-size:13px;color:var(--muted);line-height:1.2}
+</style>
+</head>
+<body>
+  <div class="container" role="application" aria-label="Snake game">
+    <div class="title">
+      <div>
+        <h1>🍏 Snake</h1>
+        <small>Use Arrow keys / WASD (or on-screen buttons on mobile)</small>
+      </div>
+      <div style="text-align:right">
+        <small>Score your best — try to not crash!</small>
+      </div>
+    </div>
+
+    <div>
+      <canvas id="game" width="480" height="480"></canvas>
+      <div class="touch-pad" id="touchPad" aria-hidden="true">
+        <div style="display:flex;flex-direction:column;align-items:center">
+          <button id="upBtn">↑</button>
+          <div style="display:flex; gap:8px; margin-top:8px">
+            <button id="leftBtn">←</button>
+            <button id="downBtn">↓</button>
+            <button id="rightBtn">→</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" aria-hidden="false">
+      <div class="stats">
+        <div>Score: <span id="score">0</span></div>
+        <div>High: <span id="best">0</span></div>
+      </div>
+
+      <div class="controls">
+        <button id="startBtn" class="primary">Start / Restart</button>
+        <button id="pauseBtn">Pause</button>
+        <button id="speedDown">Slower</button>
+        <button id="speedUp">Faster</button>
+      </div>
+
+      <div class="hint">
+        <p><strong>Tips:</strong> Eat the green apples → you grow. Avoid hitting walls or yourself.</p>
+        <p style="margin:0">Grid size and speed can affect difficulty. On mobile, use the arrows shown below the canvas.</p>
+      </div>
+    </div>
+  </div>
+
+<script>
+/*
+ Simple Snake game
+ - Grid-based
+ - Arrow keys or WASD
+ - On-screen touch buttons for mobile
+*/
+
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const scoreEl = document.getElementById('score');
+const bestEl = document.getElementById('best');
+const startBtn = document.getElementById('startBtn');
+const pauseBtn = document.getElementById('pauseBtn');
+const speedUp = document.getElementById('speedUp');
+const speedDown = document.getElementById('speedDown');
+const touchPad = document.getElementById('touchPad');
+
+const CELL = 20; // grid cell size (px)
+let cols = Math.floor(canvas.width / CELL);
+let rows = Math.floor(canvas.height / CELL);
+
+let snake, dir, apple, score, bestScore, running, speed, tickInterval, paused = false;
+
+function reset() {
+  cols = Math.floor(canvas.width / CELL);
+  rows = Math.floor(canvas.height / CELL);
+  snake = [{x: Math.floor(cols/2), y: Math.floor(rows/2)}];
+  dir = {x: 0, y: 0}; // not moving until start
+  placeApple();
+  score = 0;
+  running = false;
+  paused = false;
+  speed = 8; // ticks per second
+  updateHUD();
+}
+
+function placeApple(){
+  let valid = false;
+  while(!valid){
+    apple = {x: rand(0, cols-1), y: rand(0, rows-1)};
+    valid = !snake.some(s => s.x === apple.x && s.y === apple.y);
+  }
+}
+
+function rand(a,b){ return Math.floor(Math.random()*(b-a+1))+a; }
+
+function updateHUD(){
+  scoreEl.textContent = score;
+  bestScore = Number(localStorage.getItem('snake_best') || 0);
+  bestEl.textContent = bestScore;
+}
+
+function start(){
+  if(running){ reset(); } // restart if already running
+  running = true;
+  paused = false;
+  if(dir.x === 0 && dir.y === 0){
+    dir = {x:1, y:0}; // initial direction
+  }
+  if(tickInterval) clearInterval(tickInterval);
+  tickInterval = setInterval(tick, 1000 / speed);
+}
+
+function pauseToggle(){
+  if(!running) return;
+  paused = !paused;
+  pauseBtn.textContent = paused ? 'Resume' : 'Pause';
+}
+
+function changeSpeed(delta){
+  speed = Math.max(3, Math.min(20, speed + delta));
+  if(running){
+    clearInterval(tickInterval);
+    tickInterval = setInterval(tick, 1000 / speed);
+  }
+}
+
+function tick(){
+  if(paused) return;
+  // calculate new head
+  const head = {x: snake[0].x + dir.x, y: snake[0].y + dir.y};
+
+  // wall collision = game over
+  if(head.x < 0 || head.x >= cols || head.y < 0 || head.y >= rows){
+    gameOver();
+    return;
+  }
+  // self collision
+  if(snake.some(seg => seg.x === head.x && seg.y === head.y)){
+    gameOver();
+    return;
+  }
+  // move snake
+  snake.unshift(head);
+  // apple?
+  if(head.x === apple.x && head.y === apple.y){
+    score++;
+    if(score > bestScore){
+      bestScore = score;
+      localStorage.setItem('snake_best', bestScore);
+    }
+    placeApple();
+  } else {
+    snake.pop(); // remove tail
+  }
+  updateHUD();
+  render();
+}
+
+function gameOver(){
+  running = false;
+  clearInterval(tickInterval);
+  alert('Game over! Score: ' + score);
+  updateHUD();
+}
+
+function render(){
+  // clear
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  // background grid (subtle)
+  ctx.fillStyle = '#031220';
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+
+  // draw apple
+  drawCell(apple.x, apple.y, '#16a34a');
+
+  // draw snake
+  for(let i=0;i<snake.length;i++){
+    const s = snake[i];
+    drawCell(s.x, s.y, i===0 ? '#b7f5d0' : '#8ef0a6');
+  }
+
+  // small HUD overlay
+  ctx.fillStyle = 'rgba(0,0,0,0.2)';
+  ctx.fillRect(6,6,110,28);
+  ctx.fillStyle = '#bcd9c7';
+  ctx.font = '12px system-ui';
+  ctx.fillText('Score: ' + score, 12, 24);
+}
+
+function drawCell(cx, cy, color){
+  ctx.fillStyle = color;
+  ctx.fillRect(cx*CELL + 1, cy*CELL + 1, CELL - 2, CELL - 2);
+}
+
+function setDir(nx, ny){
+  // prevent reversing directly
+  if(snake.length > 1 && nx === -dir.x && ny === -dir.y) return;
+  dir = {x: nx, y: ny};
+}
+
+// keyboard controls
+window.addEventListener('keydown', e => {
+  if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','w','a','s','d','W','A','S','D'].indexOf(e.key) === -1) return;
+  e.preventDefault();
+  switch(e.key){
+    case 'ArrowUp': case 'w': case 'W': setDir(0,-1); break;
+    case 'ArrowDown': case 's': case 'S': setDir(0,1); break;
+    case 'ArrowLeft': case 'a': case 'A': setDir(-1,0); break;
+    case 'ArrowRight': case 'd': case 'D': setDir(1,0); break;
+  }
+});
+
+// window resize handling — keep canvas resolution fixed but adapt grid if needed
+function resizeCanvas(){
+  // keep physical pixel size (so cell math matches)
+  const rect = canvas.getBoundingClientRect();
+  // maintain internal drawing buffer same as initial width/height to keep square grid
+  // no change needed here; but you could re-scale if implementing responsive grid.
+}
+window.addEventListener('resize', resizeCanvas);
+
+// buttons
+startBtn.addEventListener('click', start);
+pauseBtn.addEventListener('click', pauseToggle);
+speedUp.addEventListener('click', ()=> changeSpeed(2));
+speedDown.addEventListener('click', ()=> changeSpeed(-2));
+
+// touch controls (mobile)
+const upBtn = document.getElementById('upBtn');
+const leftBtn = document.getElementById('leftBtn');
+const rightBtn = document.getElementById('rightBtn');
+const downBtn = document.getElementById('downBtn');
+
+[upBtn,leftBtn,rightBtn,downBtn].forEach(b => {
+  b.addEventListener('touchstart', e => e.preventDefault());
+  b.addEventListener('click', e => {
+    if(b === upBtn) setDir(0,-1);
+    if(b === downBtn) setDir(0,1);
+    if(b === leftBtn) setDir(-1,0);
+    if(b === rightBtn) setDir(1,0);
+  });
+});
+
+// initialize
+reset();
+render();
+
+// show touch pad only on small screens
+if(window.innerWidth <= 720) touchPad.style.display = 'flex';
+</script>
+</body>
+</html>
